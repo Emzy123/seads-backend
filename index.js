@@ -15,6 +15,12 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
   }
 });
 
+const authRoutes = require('./src/routes/auth')(supabase);
+const userRoutes = require('./src/routes/users')(supabase);
+
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+
 // Health check
 app.get('/', (req, res) => {
   res.json({ status: 'SEADS backend is running' });
