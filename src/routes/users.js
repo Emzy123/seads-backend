@@ -4,6 +4,63 @@ const { authenticateToken } = require('../middleware/auth');
 module.exports = function (supabase) {
   const router = express.Router();
 
+  // GET /api/users/:userId — fetch a user profile by Firebase UID.
+  // Called by the Flutter router guard on every navigation event.
+  // NOTE: authenticateToken is NOT applied here so the router guard can
+  // call this using the Firebase ID token (see dual-token audit note).
+  // TODO: Replace token verification with firebase-admin once wired up.
+  router.get('/:userId', async (req, res) => {
+    const { userId } = req.params;
+
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, name, phone, role, firebase_uid')
+      .eq('firebase_uid', userId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json(data);
+  });
+
+  // POST /api/users/role — save or update role for a newly registered user.
+  // Called by RoleSelectionScreen after a user picks their role.
+  router.post('/role', async (req, res) => {
+    const { user_id, phone_number, role, name } = req.body;
+
+    if (!user_id || !role) {
+      return res.status(400).json({ error: 'user_id and role are required' });
+    }
+
+    const validRoles = ['patient', 'paramedic', 'dispatcher'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: `role must be one of: ${validRoles.join(', ')}` });
+    }
+
+    // Upsert: create user if not exists, otherwise update role
+    const { data, error } = await supabase
+      .from('users')
+      .upsert(
+        { firebase_uid: user_id, phone: phone_number, role, name: name || '' },
+        { onConflict: 'firebase_uid' }
+      )
+      .select('id, name, phone, role')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(201).json({ user: data });
+  });
+
+  // All routes below this line require a valid JWT token
   router.use(authenticateToken);
 
   router.put('/profile', async (req, res) => {

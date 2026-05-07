@@ -5,16 +5,16 @@ module.exports = function (supabase) {
   const router = express.Router();
 
   router.post('/login', async (req, res) => {
-    const { phone, firebase_uid } = req.body;
+    const { email, firebase_uid } = req.body;
 
-    if (!phone || !firebase_uid) {
-      return res.status(400).json({ error: 'phone and firebase_uid are required' });
+    if (!email || !firebase_uid) {
+      return res.status(400).json({ error: 'email and firebase_uid are required' });
     }
 
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, name, phone, role')
-      .eq('phone', phone)
+      .select('id, name, email, phone, role')
+      .eq('email', email.trim().toLowerCase())
       .maybeSingle();
 
     if (error) {
@@ -26,7 +26,7 @@ module.exports = function (supabase) {
     }
 
     const token = jwt.sign(
-      { id: user.id, phone: user.phone, role: user.role },
+      { id: user.id, email: user.email, phone: user.phone, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -36,6 +36,7 @@ module.exports = function (supabase) {
       user: {
         id: user.id,
         name: user.name,
+        email: user.email,
         phone: user.phone,
         role: user.role
       }
@@ -43,16 +44,22 @@ module.exports = function (supabase) {
   });
 
   router.post('/register', async (req, res) => {
-    const { phone, firebase_uid, name, role } = req.body;
+    const { email, password, name, role, firebase_uid, phone } = req.body;
 
-    if (!phone || !firebase_uid || !name || !role) {
-      return res.status(400).json({ error: 'phone, firebase_uid, name, and role are required' });
+    if (!email || !firebase_uid || !name || !role || !phone) {
+      return res.status(400).json({ error: 'email, firebase_uid, name, phone, and role are required' });
     }
 
     const { data: user, error } = await supabase
       .from('users')
-      .insert({ phone, firebase_uid, name, role })
-      .select('id, name, phone, role')
+      .insert({ 
+        email: email.trim().toLowerCase(), 
+        firebase_uid, 
+        name: name.trim(), 
+        role,
+        phone: phone.trim()
+      })
+      .select('id, name, email, phone, role')
       .maybeSingle();
 
     if (error) {
@@ -60,7 +67,7 @@ module.exports = function (supabase) {
     }
 
     const token = jwt.sign(
-      { id: user.id, phone: user.phone, role: user.role },
+      { id: user.id, email: user.email, phone: user.phone, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -70,6 +77,7 @@ module.exports = function (supabase) {
       user: {
         id: user.id,
         name: user.name,
+        email: user.email,
         phone: user.phone,
         role: user.role
       }
@@ -91,7 +99,7 @@ module.exports = function (supabase) {
 
       const { data: user, error: userError } = await supabase
         .from('users')
-        .select('id, name, phone, role, blood_type, allergies, conditions, firebase_uid, fcm_token')
+        .select('id, name, email, phone, role, blood_type, allergies, conditions, firebase_uid, fcm_token')
         .eq('id', decoded.id)
         .maybeSingle();
 

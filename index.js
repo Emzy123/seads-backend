@@ -2,19 +2,22 @@ const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 
+// Shared config modules — must be imported before routes/middleware
+const supabase = require('./src/config/supabase');
+require('./src/config/firebase'); // initializes Firebase Admin SDK
+
+const { authenticateToken } = require('./src/middleware/auth');
+
 const app = express();
-app.use(cors());
+
+// TODO: In production, restrict origin to your actual client domains
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+}));
 app.use(express.json());
 
-const { createClient } = require('@supabase/supabase-js');
-const WebSocket = require('ws');
-
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, {
-  realtime: {
-    transport: WebSocket
-  }
-});
-
+// Pass the shared supabase client into route factories
 const authRoutes = require('./src/routes/auth')(supabase);
 const userRoutes = require('./src/routes/users')(supabase);
 
@@ -26,8 +29,8 @@ app.get('/', (req, res) => {
   res.json({ status: 'SEADS backend is running' });
 });
 
-// Nearest ambulance query
-app.post('/api/dispatch', async (req, res) => {
+// Nearest ambulance dispatch — requires authenticated Firebase user
+app.post('/api/dispatch', authenticateToken, async (req, res) => {
   const { lat, lng, patient_id, emergency_type, description } = req.body;
 
   // Find nearest available ambulance using PostGIS
@@ -70,6 +73,7 @@ app.post('/api/dispatch', async (req, res) => {
   });
 });
 
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`SEADS backend running on port ${PORT}`);
 });
