@@ -1,20 +1,23 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
+const { validate } = require('../middleware/validate');
+const { loginSchema, registerSchema } = require('../validations/schemas');
+const { authLimiter } = require('../middleware/rateLimiter');
+const { authenticateToken } = require('../middleware/auth');
 
 module.exports = function (supabase) {
   const router = express.Router();
 
-  router.post('/login', async (req, res) => {
-    const { email, firebase_uid } = req.body;
+  // Apply rate limiting to login and register
+  router.use('/login', authLimiter);
+  router.use('/register', authLimiter);
 
-    if (!email || !firebase_uid) {
-      return res.status(400).json({ error: 'email and firebase_uid are required' });
-    }
+  router.post('/login', validate(loginSchema), async (req, res) => {
+    const { email, firebase_uid } = req.body;
 
     const { data: user, error } = await supabase
       .from('users')
       .select('id, name, email, phone, role')
-      .eq('email', email.trim().toLowerCase())
+      .eq('email', email)
       .maybeSingle();
 
     if (error) {
@@ -25,14 +28,9 @@ module.exports = function (supabase) {
       return res.json({ exists: false });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, phone: user.phone, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
+    // Since Firebase ID tokens are handled by the Flutter app,
+    // we no longer issue a custom JWT here.
     return res.json({
-      token,
       user: {
         id: user.id,
         name: user.name,
@@ -43,21 +41,17 @@ module.exports = function (supabase) {
     });
   });
 
-  router.post('/register', async (req, res) => {
-    const { email, password, name, role, firebase_uid, phone } = req.body;
-
-    if (!email || !firebase_uid || !name || !role || !phone) {
-      return res.status(400).json({ error: 'email, firebase_uid, name, phone, and role are required' });
-    }
+  router.post('/register', validate(registerSchema), async (req, res) => {
+    const { email, name, role, firebase_uid, phone } = req.body;
 
     const { data: user, error } = await supabase
       .from('users')
       .insert({ 
-        email: email.trim().toLowerCase(), 
+        email, 
         firebase_uid, 
-        name: name.trim(), 
+        name, 
         role,
-        phone: phone.trim()
+        phone
       })
       .select('id, name, email, phone, role')
       .maybeSingle();
@@ -66,14 +60,7 @@ module.exports = function (supabase) {
       return res.status(500).json({ error: error.message });
     }
 
-    const token = jwt.sign(
-      { id: user.id, email: user.email, phone: user.phone, role: user.role },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
     return res.json({
-      token,
       user: {
         id: user.id,
         name: user.name,
@@ -84,35 +71,24 @@ module.exports = function (supabase) {
     });
   });
 
-  router.get('/me', async (req, res) => {
-    const authHeader = req.headers.authorization || '';
-    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  // Re-use the existing Firebase authenticateToken middleware
+  router.get('/me', authenticateToken, async (req, res) => {
+    // req.user is populated by authenticateToken
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('id, name, email, phone, role, blood_type, allergies, conditions, firebase_uid, fcm_token')
+      .eq('id', req.user.id)
+      .maybeSingle();
 
-    if (!token) {
-      return res.status(401).json({ error: 'Missing token' });
+    if (userError) {
+      return res.status(500).json({ error: userError.message });
     }
 
-    jwt.verify(token, process.env.JWT_SECRET, async (err, decoded) => {
-      if (err) {
-        return res.status(401).json({ error: 'Invalid token' });
-      }
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-      const { data: user, error: userError } = await supabase
-        .from('users')
-        .select('id, name, email, phone, role, blood_type, allergies, conditions, firebase_uid, fcm_token')
-        .eq('id', decoded.id)
-        .maybeSingle();
-
-      if (userError) {
-        return res.status(500).json({ error: userError.message });
-      }
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      return res.json({ user });
-    });
+    return res.json({ user });
   });
 
   return router;

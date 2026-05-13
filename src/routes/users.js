@@ -1,5 +1,7 @@
 const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
+const { validate } = require('../middleware/validate');
+const { roleUpdateSchema, profileUpdateSchema, fcmTokenSchema, contactSchema } = require('../validations/schemas');
 
 module.exports = function (supabase) {
   const router = express.Router();
@@ -7,8 +9,7 @@ module.exports = function (supabase) {
   // GET /api/users/:userId — fetch a user profile by Firebase UID.
   // Called by the Flutter router guard on every navigation event.
   // NOTE: authenticateToken is NOT applied here so the router guard can
-  // call this using the Firebase ID token (see dual-token audit note).
-  // TODO: Replace token verification with firebase-admin once wired up.
+  // call this using the Firebase ID token.
   router.get('/:userId', async (req, res) => {
     const { userId } = req.params;
 
@@ -31,17 +32,8 @@ module.exports = function (supabase) {
 
   // POST /api/users/role — save or update role for a newly registered user.
   // Called by RoleSelectionScreen after a user picks their role.
-  router.post('/role', async (req, res) => {
+  router.post('/role', validate(roleUpdateSchema), async (req, res) => {
     const { user_id, phone_number, role, name } = req.body;
-
-    if (!user_id || !role) {
-      return res.status(400).json({ error: 'user_id and role are required' });
-    }
-
-    const validRoles = ['patient', 'paramedic', 'dispatcher'];
-    if (!validRoles.includes(role)) {
-      return res.status(400).json({ error: `role must be one of: ${validRoles.join(', ')}` });
-    }
 
     // Upsert: create user if not exists, otherwise update role
     const { data, error } = await supabase
@@ -60,21 +52,11 @@ module.exports = function (supabase) {
     return res.status(201).json({ user: data });
   });
 
-  // All routes below this line require a valid JWT token
+  // All routes below this line require a valid Firebase ID token
   router.use(authenticateToken);
 
-  router.put('/profile', async (req, res) => {
-    const { name, blood_type, allergies, conditions } = req.body;
-    const updates = {};
-
-    if (name !== undefined) updates.name = name;
-    if (blood_type !== undefined) updates.blood_type = blood_type;
-    if (allergies !== undefined) updates.allergies = allergies;
-    if (conditions !== undefined) updates.conditions = conditions;
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({ error: 'No profile fields provided' });
-    }
+  router.put('/profile', validate(profileUpdateSchema), async (req, res) => {
+    const updates = req.body; // already sanitized by validate
 
     const { data, error } = await supabase
       .from('users')
@@ -90,12 +72,8 @@ module.exports = function (supabase) {
     return res.json({ user: data });
   });
 
-  router.post('/fcm-token', async (req, res) => {
+  router.post('/fcm-token', validate(fcmTokenSchema), async (req, res) => {
     const { fcm_token } = req.body;
-
-    if (!fcm_token) {
-      return res.status(400).json({ error: 'fcm_token is required' });
-    }
 
     const { data, error } = await supabase
       .from('users')
@@ -124,12 +102,8 @@ module.exports = function (supabase) {
     return res.json({ contacts: data || [] });
   });
 
-  router.post('/contacts', async (req, res) => {
+  router.post('/contacts', validate(contactSchema), async (req, res) => {
     const { name, phone, relation } = req.body;
-
-    if (!name || !phone || !relation) {
-      return res.status(400).json({ error: 'name, phone, and relation are required' });
-    }
 
     const { data, error } = await supabase
       .from('emergency_contacts')

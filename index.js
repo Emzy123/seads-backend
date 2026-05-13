@@ -7,6 +7,8 @@ const supabase = require('./src/config/supabase');
 require('./src/config/firebase'); // initializes Firebase Admin SDK
 
 const { authenticateToken } = require('./src/middleware/auth');
+const { validate } = require('./src/middleware/validate');
+const { dispatchSchema } = require('./src/validations/schemas');
 
 const app = express();
 
@@ -20,9 +22,13 @@ app.use(express.json());
 // Pass the shared supabase client into route factories
 const authRoutes = require('./src/routes/auth')(supabase);
 const userRoutes = require('./src/routes/users')(supabase);
+const ambulanceRoutes = require('./src/routes/ambulances')(supabase);
+const incidentRoutes = require('./src/routes/incidents')(supabase);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/ambulances', ambulanceRoutes);
+app.use('/api/incidents', incidentRoutes);
 
 // Health check
 app.get('/', (req, res) => {
@@ -30,7 +36,7 @@ app.get('/', (req, res) => {
 });
 
 // Nearest ambulance dispatch — requires authenticated Firebase user
-app.post('/api/dispatch', authenticateToken, async (req, res) => {
+app.post('/api/dispatch', authenticateToken, validate(dispatchSchema), async (req, res) => {
   const { lat, lng, patient_id, emergency_type, description } = req.body;
 
   // Find nearest available ambulance using PostGIS
