@@ -2,6 +2,7 @@ const express = require('express');
 const { authenticateToken } = require('../middleware/auth');
 const { validate } = require('../middleware/validate');
 const { incidentStatusSchema } = require('../validations/schemas');
+const { notifyPatientOnScene, notifyPatientEnRoute } = require('../services/notifications');
 
 module.exports = function (supabase) {
   const router = express.Router();
@@ -22,7 +23,7 @@ module.exports = function (supabase) {
       .from('incidents')
       .update({ status })
       .eq('id', id)
-      .select()
+      .select('*, patient:patient_id(name, fcm_token)')
       .maybeSingle();
 
     if (error) {
@@ -40,6 +41,16 @@ module.exports = function (supabase) {
           .from('ambulances')
           .update({ status: 'available' })
           .eq('id', incident.ambulance_id);
+      }
+    }
+
+    // Send push notification to patient based on status change
+    const patientFcmToken = incident.patient?.fcm_token;
+    if (patientFcmToken) {
+      if (status === 'en_route') {
+        await notifyPatientEnRoute({ patientFcmToken, incidentId: incident.id });
+      } else if (status === 'on_scene') {
+        await notifyPatientOnScene({ patientFcmToken, incidentId: incident.id });
       }
     }
 

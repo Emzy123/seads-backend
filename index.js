@@ -38,6 +38,7 @@ app.get('/', (req, res) => {
 // Nearest ambulance dispatch — requires authenticated Firebase user
 app.post('/api/dispatch', authenticateToken, validate(dispatchSchema), async (req, res) => {
   const { lat, lng, patient_id, emergency_type, description } = req.body;
+  const { notifyParamedicDispatched, notifyPatientEnRoute } = require('./src/services/notifications');
 
   // Find nearest available ambulance using PostGIS
   const { data: ambulance, error } = await supabase
@@ -70,6 +71,37 @@ app.post('/api/dispatch', authenticateToken, validate(dispatchSchema), async (re
     .from('ambulances')
     .update({ status: 'en_route' })
     .eq('id', nearest.id);
+
+  // Fetch paramedic's FCM token to notify them of dispatch
+  if (nearest.paramedic_id) {
+    const { data: paramedic } = await supabase
+      .from('users')
+      .select('fcm_token, name')
+      .eq('id', nearest.paramedic_id)
+      .maybeSingle();
+
+    if (paramedic?.fcm_token) {
+      // Fetch patient name for the notification
+      const { data: patient } = await supabase
+        .from('users').select('name, fcm_token').eq('id', patient_id).maybeSingle();
+
+      // Notify paramedic of the new emergency
+      await notifyParamedicDispatched({
+        paramedicFcmToken: paramedic.fcm_token,
+        incidentId: incident.id,
+        emergencyType: emergency_type,
+        patientName: patient?.name,
+      });
+
+      // Notify patient that ambulance is on the way
+      if (patient?.fcm_token) {
+        await notifyPatientEnRoute({
+          patientFcmToken: patient.fcm_token,
+          incidentId: incident.id,
+        });
+      }
+    }
+  }
 
   res.json({
     message: 'Ambulance dispatched',
